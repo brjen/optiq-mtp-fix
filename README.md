@@ -47,6 +47,16 @@ python3 build_mtp_model_dir.py \
   --out /path/to/Qwen3.8-27B-MLX-4bit-mtp
 ```
 
+## Verify the silent no-op yourself
+
+No wrapper needed to see bug 1 — on stock 0.4.25:
+
+1. Serve with `optiq serve --model <qwen-mtp-dir> --mtp --mtp-depth 1 --kv-bits 8`.
+2. Run any greedy (temp 0) generation and note tok/s. Restart **without** `--mtp` and run the same prompt.
+3. Same speed, byte-identical output — and no log line about the MTP engine attaching. The speculation engine never loaded; `--mtp` changed nothing.
+
+For bug 3: force the sequential path with the engine attached and send a ~3K+ token prompt — Metal OOM during prefill (one forward pass materializing `L × vocab` logits).
+
 ## Measured results (M5 Air 24 GB, Qwen3.8-27B MLX 4-bit, kv8, MTP depth 1)
 
 | Metric | Stock 0.4.25 (`--mtp --kv-bits 8`) | With wrapper |
@@ -59,8 +69,9 @@ python3 build_mtp_model_dir.py \
 
 ## Caveats
 
-- Monkey-patches private internals of a specific release (0.4.25). This is a workaround, not a patch series; if the mlx-optiq authors read this — issues 1–3 above reproduce trivially and would be small fixes upstream.
-- MTP depth 1; deeper speculation untested here.
+- Monkey-patches private internals of a specific release (**mlx-optiq 0.4.25 exactly** — the wrapper warns loudly on any other version; re-verify with your own A/B after upgrading). mlx-optiq has no public source repo or issue tracker as of this writing, so this repo doubles as the bug report; if the mlx-optiq authors read this — issues 1–3 above reproduce trivially and would be small fixes upstream.
+- Tested **only** on Qwen3.8-27B (Qwen3.5-arch hybrid: 48 linear + 16 full-attention layers) with the mlx-community MTP head at **depth 1**. Other models, hybrid layouts, and deeper speculation are untested here.
+- The quality A/B ran at **temperature 0** (6/6 correct, same answer tier). Trajectories still diverge from the no-MTP baseline at temp 0 — speculative verify kernels differ numerically — and under sampling they will diverge more. That's expected speculation behavior, not a quality loss, but judge it on your own workload.
 - Vision/multimodal requests bypass the chunked prefill (`input_embeddings`/`per_layer_inputs` fall through to the original forward).
 
 ## License
